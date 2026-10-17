@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ฝ่าฝูงชน – Prototype</title>
+<style>
+:root{--bg:#eef1ee;--ink:#1d2b24;--card:#fff;--muted:#5d6b64;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141a17;--ink:#e8efe9;--card:#222c27;--muted:#9aa8a0}}
+:root[data-theme="dark"]{--bg:#141a17;--ink:#e8efe9;--card:#222c27;--muted:#9aa8a0}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:"Noto Sans Thai","Sarabun",system-ui,sans-serif;display:flex;justify-content:center;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+#wrap{position:relative;width:100%;max-width:480px;height:100%}
+canvas{width:100%;height:100%;display:block}
+#hud{position:absolute;top:10px;left:0;right:0;display:flex;justify-content:space-between;padding:0 16px;font-weight:700;pointer-events:none;font-size:15px}
+#hud span{background:var(--card);padding:4px 12px;border-radius:999px}
+#msg{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;background:rgba(10,20,15,.55);color:#fff;gap:6px}
+#msg h1{margin:0;font-size:28px}
+#msg p{margin:0;font-size:16px;opacity:.92}
+#msg .big{font-size:44px;font-weight:800}
+#msg.hide{display:none}
+</style>
+</head>
+<body>
+<div id="wrap">
+<canvas id="c"></canvas>
+<div id="hud"><span id="sc">0 ม.</span><span id="bs">สูงสุด 0 ม.</span></div>
+<div id="msg"><h1>ฝ่าฝูงชนขึ้นรถไฟฟ้า</h1><p>แตะซ้าย/ขวา หรือปัดเพื่อเปลี่ยนเลน<br>หลบคนให้ถึงประตูรถไฟฟ้า</p><p><b>แตะเพื่อเริ่ม</b></p></div>
+</div>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d'),msg=document.getElementById('msg');
+const sc=document.getElementById('sc'),bs=document.getElementById('bs');
+const LANES=4;let W,H,LW,dpr;
+let best=0;try{best=+localStorage.getItem('cd_best')||0}catch(e){}
+bs.textContent='สูงสุด '+best+' ม.';
+function resize(){dpr=window.devicePixelRatio||1;W=cv.clientWidth;H=cv.clientHeight;cv.width=W*dpr;cv.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);LW=W/LANES}
+addEventListener('resize',resize);resize();
+
+let state='idle',lane=1,px=0,obs=[],dist=0,speed=260,spawnT=0,lastFree=1,tLast,deadAt=0,shake=0;
+const colors=['#e0605a','#e09a3a','#6a8fd8','#9a6ad0','#4aa88a'];
+function reset(){resize();lane=1;px=laneX(lane);obs=[];dist=0;speed=260;spawnT=0;lastFree=1;shake=0;state='play';msg.classList.add('hide')}
+function laneX(l){return l*LW+LW/2}
+
+function spawnRow(){
+  // เว้นช่องว่างอย่างน้อย 1 เลน และไม่ห่างจากช่องก่อนหน้าเกินเอื้อม
+  let free=Math.max(0,Math.min(LANES-1,lastFree+Math.floor(Math.random()*3)-1));
+  for(let l=0;l<LANES;l++){
+    if(l===free)continue;
+    if(Math.random()<0.78)obs.push({l,y:-60,c:colors[(Math.random()*colors.length)|0],w:LW*0.62,h:46})
+  }
+  lastFree=free;
+}
+function move(d){if(state!=='play')return;lane=Math.max(0,Math.min(LANES-1,lane+d))}
+function over(){
+  state='dead';deadAt=performance.now();shake=12;
+  const m=Math.floor(dist/10);
+  if(m>best){best=m;try{localStorage.setItem('cd_best',best)}catch(e){}}
+  bs.textContent='สูงสุด '+best+' ม.';
+  msg.innerHTML='<h1>ชนเข้าแล้ว!</h1><div class="big">'+m+' ม.</div><p>สูงสุด '+best+' ม.</p><p><b>แตะเพื่อเล่นใหม่</b></p>';
+  msg.classList.remove('hide');
+}
+function tap(x){
+  if(state!=='play'){ if(state==='idle'||performance.now()-deadAt>350)reset(); return }
+  move(x<W/2?-1:1);
+}
+let sx=null;
+cv.addEventListener('pointerdown',e=>{sx=e.clientX;});
+cv.addEventListener('pointerup',e=>{
+  if(sx===null)return;
+  const dx=e.clientX-sx;sx=null;
+  if(Math.abs(dx)>30&&state==='play')move(dx>0?1:-1); else tap(e.clientX-cv.getBoundingClientRect().left);
+});
+msg.addEventListener('pointerdown',e=>{e.stopPropagation();tap(0)});
+addEventListener('keydown',e=>{
+  if(e.key==='ArrowLeft')state==='play'?move(-1):tap(0);
+  else if(e.key==='ArrowRight')state==='play'?move(1):tap(0);
+  else if(e.key===' '||e.key==='Enter')tap(0);
+});
+
+function update(dt){
+  speed=260+Math.min(dist/10,300)*1.6;
+  dist+=speed*dt*0.1;
+  spawnT-=dt;
+  if(spawnT<=0){spawnRow();spawnT=Math.max(0.34,150/speed*1.6)}
+  const tx=laneX(lane);px+=(tx-px)*Math.min(1,dt*22);
+  const py=H-110,pw=LW*0.5,ph=40;
+  for(const o of obs){
+    o.y+=speed*dt;
+    const ox=laneX(o.l);
+    if(Math.abs(ox-px)<(o.w+pw)/2-6&&Math.abs(o.y-py)<(o.h+ph)/2-6){over();return}
+  }
+  obs=obs.filter(o=>o.y<H+80);
+  sc.textContent=Math.floor(dist/10)+' ม.';
+}
+function rr(x,y,w,h,r,fill){ctx.fillStyle=fill;ctx.beginPath();if(ctx.roundRect){ctx.roundRect(x-w/2,y-h/2,w,h,r)}else{ctx.rect(x-w/2,y-h/2,w,h)}ctx.fill()}
+function draw(){
+  ctx.save();
+  if(shake>0){ctx.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);shake*=0.85}
+  ctx.fillStyle='#d9ded9';ctx.fillRect(-20,-20,W+40,H+40);
+  // พื้นชานชาลา + เส้นเลน
+  ctx.strokeStyle='#b9c2bb';ctx.lineWidth=2;ctx.setLineDash([14,18]);ctx.lineDashOffset=-(dist*1.2)%32;
+  for(let l=1;l<LANES;l++){ctx.beginPath();ctx.moveTo(l*LW,0);ctx.lineTo(l*LW,H);ctx.stroke()}
+  ctx.setLineDash([]);
+  for(const o of obs)rr(laneX(o.l),o.y,o.w,o.h,12,o.c);
+  rr(px,H-110,LW*0.5,40,12,'#1d2b24');
+  ctx.fillStyle='#f4c542';ctx.fillRect(px-8,H-120,16,6);
+  ctx.restore();
+}
+function loop(t){
+  requestAnimationFrame(loop);
+  if(cv.clientWidth!==W||cv.clientHeight!==H)resize();
+  const dt=Math.min(0.033,(t-(tLast||t))/1000);tLast=t;
+  try{if(state==='play')update(dt);draw()}catch(err){console.error(err)}
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
